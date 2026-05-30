@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Smart Museum Digital Twin Dashboard</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">MQTT + CoAP + Preservation Twin</p>
+          <h1>Smart Museum Digital Twin</h1>
+          <p class="hero-text">
+            MQTT collects real-time museum telemetry, CoAP supports lightweight
+            query/control, and the digital twin dashboard visualizes preservation
+            risks, sensor reliability, and recommended actions.
+          </p>
+        </div>
+        <div class="status-panel">
+          <span class="pulse"></span>
+          <div>
+            <strong id="device-count">0 zones</strong>
+            <small><span id="online-count">0 online</span> / <span id="alert-count">0 active risks</span></small>
+          </div>
+        </div>
+      </section>
+
+      <section class="summary-strip">
+        <div class="summary-card">
+          <span>Total Zones</span>
+          <strong id="summary-total">0</strong>
+        </div>
+        <div class="summary-card">
+          <span>Online Sensors</span>
+          <strong id="summary-online">0</strong>
+        </div>
+        <div class="summary-card">
+          <span>Offline Sensors</span>
+          <strong id="summary-offline">0</strong>
+        </div>
+        <div class="summary-card warning">
+          <span>Active Risks</span>
+          <strong id="summary-alerts">0</strong>
+        </div>
+      </section>
+
+      <section class="panel command-center">
+        <div class="command-head">
+          <div>
+            <p class="eyebrow">3D Digital Twin</p>
+            <h2>Smart Museum Command Center</h2>
+            <p class="muted">
+              Live 3D view of museum zones. Sensor color, battery marker, motion pulse,
+              and offline state are synchronized with the backend digital twin.
+            </p>
+          </div>
+          <div class="scene-status-card">
+            <span id="three-selected-zone">Waiting for telemetry</span>
+            <strong id="three-risk-text">No 3D data yet</strong>
+            <small>Click a 3D sensor node to inspect its twin.</small>
+          </div>
+        </div>
+        <div class="command-stage">
+          <canvas id="museum-3d-canvas" aria-label="3D museum digital twin"></canvas>
+          <div class="stage-glow"></div>
+          <div class="stage-legend">
+            <span><i class="dot normal"></i>Normal</span>
+            <span><i class="dot warning"></i>Warning</span>
+            <span><i class="dot critical"></i>Critical</span>
+            <span><i class="dot offline"></i>Offline</span>
+          </div>
+        </div>
+        <div id="three-zone-legend" class="zone-legend"></div>
+      </section>
+
+      <section class="grid">
+        <article class="panel">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Museum Zones</p>
+              <h2>Monitored Zones</h2>
+            </div>
+            <button id="refresh-button" class="ghost-button">Refresh</button>
+          </div>
+          <div id="device-list" class="device-list"></div>
+        </article>
+
+        <article id="detail-panel" class="panel detail-panel">
+          <div class="detail-head">
+            <div>
+              <p class="eyebrow">Digital Twin</p>
+              <h2 id="selected-title">Zone waiting</h2>
+              <p id="selected-summary" class="muted">
+                Start virtual museum sensors to see preservation state here.
+              </p>
+            </div>
+            <span id="sync-badge" class="badge neutral">waiting</span>
+          </div>
+
+          <div class="metric-row">
+            <div class="metric">
+              <span>Temperature</span>
+              <strong id="metric-temp">-</strong>
+            </div>
+            <div class="metric">
+              <span>Relative Humidity</span>
+              <strong id="metric-humidity">-</strong>
+            </div>
+            <div class="metric">
+              <span>Sensor Battery</span>
+              <strong id="metric-battery">-</strong>
+            </div>
+            <div class="metric">
+              <span>Light Exposure</span>
+              <strong id="metric-light">-</strong>
+            </div>
+            <div class="metric">
+              <span>Motion</span>
+              <strong id="metric-motion">-</strong>
+            </div>
+          </div>
+
+          <div class="twin-grid">
+            <div>
+              <span>Protocol</span>
+              <strong id="twin-protocol">-</strong>
+            </div>
+            <div>
+              <span>Last seen</span>
+              <strong id="twin-last-seen">-</strong>
+            </div>
+            <div>
+              <span>Desired Actuator</span>
+              <strong id="twin-desired">-</strong>
+            </div>
+            <div>
+              <span>Reported Actuator</span>
+              <strong id="twin-reported">-</strong>
+            </div>
+          </div>
+
+          <div class="risk-score-card">
+            <span>Preservation Risk Score</span>
+            <strong id="risk-score-value">-</strong>
+            <small id="risk-score-label">waiting</small>
+            <p id="risk-score-reasons" class="risk-score-reasons">No score factors yet.</p>
+          </div>
+
+          <div class="museum-twin-card">
+            <div class="chart-title">
+              <div>
+                <p class="eyebrow">Visual Twin</p>
+                <h3>Museum Room Twin</h3>
+              </div>
+              <small id="scene-risk-label">waiting</small>
+            </div>
+            <div id="museum-scene" class="museum-scene risk-waiting">
+              <div class="scene-wall">
+                <div class="scene-light-beam"></div>
+                <div class="scene-frame">
+                  <span id="scene-zone-label">No zone selected</span>
+                </div>
+                <div class="scene-case">
+                  <div class="artifact"></div>
+                  <div id="scene-motion" class="motion-dot"></div>
+                </div>
+                <div id="scene-actuator" class="actuator-light"></div>
+              </div>
+              <div class="scene-floor"></div>
+            </div>
+            <div class="scene-bars">
+            <div>
+              <span>Light exposure</span>
+              <div class="bar"><i id="scene-light-bar" class="bar-level-safe"></i></div>
+            </div>
+            <div>
+              <span>Humidity risk</span>
+              <div class="bar"><i id="scene-humidity-bar" class="bar-level-safe"></i></div>
+            </div>
+          </div>
+          </div>
+
+          <div class="chart-card">
+            <div class="chart-title">
+              <div>
+                <p class="eyebrow">Telemetry History</p>
+                <h3>Temperature / Humidity Trend</h3>
+              </div>
+              <small>Last 20 messages</small>
+            </div>
+            <canvas id="telemetry-chart" width="760" height="260"></canvas>
+            <p id="chart-empty" class="muted chart-empty">At least two telemetry messages are needed for the chart.</p>
+          </div>
+
+          <div class="alert-card">
+            <div>
+              <p class="eyebrow">Risks</p>
+              <h3>Active Preservation Risks</h3>
+            </div>
+            <div id="alert-list" class="alert-list"></div>
+          </div>
+
+          <div class="control-card">
+            <div>
+              <p class="eyebrow">Control</p>
+              <h3>Protection Actuator</h3>
+              <p class="muted">Represents a warning light, ventilation fan, dehumidifier, or protective lighting control.</p>
+            </div>
+            <div class="button-row">
+              <button id="led-on" data-testid="led-on">Actuator ON</button>
+              <button id="led-off" class="danger" data-testid="led-off">Actuator OFF</button>
+            </div>
+          </div>
+
+          <details class="json-panel">
+            <summary>Show Raw Digital Twin JSON</summary>
+            <pre id="raw-json" class="json-box">{}</pre>
+          </details>
+        </article>
+      </section>
+
+      <section class="panel notes">
+        <p class="eyebrow">Demo Flow</p>
+        <h2>Presentation Story</h2>
+        <div class="steps">
+          <span>1. Museum zone sensors publish temperature, humidity, light, motion, and battery telemetry via MQTT.</span>
+          <span>2. The backend updates a lightweight digital twin for each zone.</span>
+          <span>3. Dashboard visualizes preservation risks, sensor reliability, and recent telemetry.</span>
+          <span>4. CoAP provides lightweight query and protection actuator control.</span>
+          <span>5. Desired and reported actuator states stay synchronized in the digital twin.</span>
+        </div>
+      </section>
+    </main>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="/app.js"></script>
+    <script type="module" src="/three-scene.js"></script>
+  </body>
+</html>

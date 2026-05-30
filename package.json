@@ -1,0 +1,37 @@
+{
+  "name": "hybrid-iot-digital-twin",
+  "version": "1.0.0",
+  "description": "Smart museum IoT monitoring demo using MQTT, CoAP, virtual sensors, and lightweight digital twins.",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "device": "node src/virtual-device.js",
+    "devices:demo": "node scripts/start-demo-devices.js",
+    "devices:museum-story": "node scripts/start-museum-story.js",
+    "device:battery-demo": "node scripts/start-battery-demo.js",
+    "coap:list": "node src/coap-client.js list",
+    "coap:summary": "node src/coap-client.js summary",
+    "coap:get": "node src/coap-client.js get",
+    "coap:control": "node src/coap-client.js control",
+    "test:smoke": "node scripts/smoke-test.js"
+  },
+  "keywords": [
+    "iot",
+    "mqtt",
+    "coap",
+    "digital-twin",
+    "dashboard",
+    "museum",
+    "archive"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "aedes": "^0.51.3",
+    "coap": "^1.4.0",
+    "express": "^4.19.2",
+    "mqtt": "^5.10.3",
+    "socket.io": "^4.7.5",
+    "three": "^0.184.0"
+  }
+}
