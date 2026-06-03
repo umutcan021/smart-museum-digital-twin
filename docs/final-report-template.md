@@ -72,12 +72,59 @@ Her bolge icin tutulan temel bilgiler:
 7. `desired.led`
 8. `reported.led`
 9. `sync.state`
-10. `alerts`
-11. `history`
+10. `decisionSupport.score`
+11. `decisionSupport.riskLevel`
+12. `decisionSupport.recommendedAction`
+13. `decisionSupport.standards`
+14. `alerts`
+15. `history`
 
 Dashboard'da `led` alani **Protection Actuator** olarak sunulur. Bu actuator gercek bir sistemde uyari isigi, fan, nem alma cihazi veya koruyucu isik kontrolu olarak dusunulebilir.
 
-## 8. MQTT Kullanimi
+Actuator durumunda iki alan ayrilir:
+
+```text
+desired.led   Kullanici/server tarafinin istedigi hedef durum
+reported.led  Cihazin gercekten uyguladigini bildirdigi son durum
+```
+
+Eger sensor offline ise veya bataryasi bitmisse yeni actuator komutu reddedilir. Boylece bataryasi biten bir cihaz icin dashboard yanlis sekilde "actuator calisti" izlenimi vermez.
+
+## 8. Karar Destek Mekanizmasi
+
+Sistemde backend tarafinda rule-based conservation decision support motoru bulunur. Bu motor her digital twin icin sensor verilerini secili koruma profiline gore degerlendirir ve `decisionSupport` alanini olusturur.
+
+Karar destek ciktisi:
+
+1. Risk skoru (`0-100`)
+2. Risk seviyesi (`Low`, `Moderate`, `High`, `Critical`)
+3. Onerilen aksiyon
+4. Karara sebep olan faktorler
+5. Kullanilan koruma profili ve esik degerleri
+
+Kullanilan basitlestirilmis profiller:
+
+```text
+Mixed museum collection:      15-25C, 45-55% RH, light <=150 lx
+Archive and paper storage:    10-25C, 30-50% RH, light <=150 lx
+Sensitive organic exhibit:    15-25C, 45-55% RH, light <=50 lx
+Entrance/access monitoring:   ortam takibi + hareket/giris sinyali
+```
+
+Bu araliklar demo icin basitlestirilmis olmakla birlikte Canadian Conservation Institute kaynaklarina dayandirilmistir:
+
+```text
+Incorrect relative humidity
+https://www.canada.ca/en/conservation-institute/services/agents-deterioration/humidity.html
+
+Care of Mounted Specimens and Pelts
+https://www.canada.ca/en/conservation-institute/services/conservation-preservation-publications/canadian-conservation-institute-notes/care-mounted-specimens-pelts.html
+
+Basic Care of Books
+https://www.canada.ca/en/conservation-institute/services/conservation-preservation-publications/canadian-conservation-institute-notes/basic-care-books.html
+```
+
+## 9. MQTT Kullanimi
 
 Cihazlar telemetry ve status mesajlarini MQTT topic'lerine gonderir:
 
@@ -92,7 +139,7 @@ Server cihazlara komut gondermek icin su topic'i kullanir:
 iot/devices/{deviceId}/commands
 ```
 
-## 9. CoAP Kullanimi
+## 10. CoAP Kullanimi
 
 CoAP hafif sorgu ve kontrol icin kullanilir:
 
@@ -109,35 +156,39 @@ CoAP komutu ornek:
 node src/coap-client.js control gallery-1 led on
 ```
 
-## 10. Alarm Kurallari
+Cihaz offline ise kontrol komutu basarili kabul edilmez. HTTP tarafinda `409 Conflict`, CoAP tarafinda `4.09 Conflict` doner.
 
-Demo esikleri:
+## 11. Karar Kurallari ve Alarm Tipleri
+
+Sistem tek bir global demo esigi yerine secili koruma profiline gore karar verir.
 
 ```text
-High temperature:   26 C
-High humidity:      60%
-Low humidity:       35%
-High light:         800 lx
-Low battery:        20%
-Offline timeout:    12 seconds
+Mixed collection:       15-25C, 45-55% RH, light <=150 lx
+Archive/paper storage:  10-25C, 30-50% RH, light <=150 lx
+Sensitive exhibit:      15-25C, 45-55% RH, light <=50 lx
+Low battery:            20%
+Offline timeout:        12 seconds
 ```
 
-Alarm tipleri:
+Karar faktorleri ve alarm tipleri:
 
 ```text
 HIGH_TEMPERATURE
+LOW_TEMPERATURE
 HIGH_HUMIDITY
 LOW_HUMIDITY
+DAMP_MOULD_RISK
 HIGH_LIGHT_EXPOSURE
 MOTION_DETECTED
 LOW_BATTERY
+BATTERY_CRITICAL
 DEVICE_OFFLINE
 STATE_SYNC_PENDING
 ```
 
-Bu esikler demo amaclidir; resmi muze koruma standardi olarak sunulmamalidir.
+Her faktor risk skoruna agirlikli katkida bulunur. Dashboard'da skor, seviye, karar sebebi ve onerilen aksiyon gosterilir.
 
-## 11. Dashboard
+## 12. Dashboard
 
 Dashboard su bolumleri icerir:
 
@@ -150,7 +201,7 @@ Dashboard su bolumleri icerir:
 7. Protection Actuator kontrolu
 8. Ham digital twin JSON blogu
 
-## 12. Test Senaryolari
+## 13. Test Senaryolari
 
 1. Server baslatilir: `npm.cmd start`
 2. Final hikaye modu baslatilir: `npm.cmd run devices:museum-story`
@@ -163,12 +214,14 @@ Dashboard su bolumleri icerir:
 9. `archive-1` sensorunun bataryasi azaldikca LOW_BATTERY alarmi gosterilir.
 10. Batarya bittiginde `archive-1` offline olur ve 3D sahnede gri/offline olarak gosterilir.
 
-## 13. RPL Hakkinda Not
+Final hikaye modunda `archive-1` bataryasi yaklasik 75 saniyede biter. Bu sure, dashboard'un incelenmesi, digital twin JSON'un gosterilmesi ve actuator davranisinin anlatilmasi icin bilerek hizli batarya demosundan daha uzun tutulmustur.
+
+## 14. RPL Hakkinda Not
 
 RPL, dusuk guclu IPv6 mesh aglarda kullanilan bir routing protokoludur. Bu proje RPL kullanmaz; cunku secilen proje kapsami MQTT, CoAP, cihaz izleme/kontrol ve digital twin uzerinedir.
 
 RPL, Contiki/Cooja veya gercek mesh ag simulasyonu eklenirse gelecek calisma olarak dusunulebilir.
 
-## 14. Sonuc
+## 15. Sonuc
 
 Bu proje MQTT, CoAP ve digital twin kavramlarini muze/arsiv koruma senaryosu uzerinde birlestirir. Sistem sanal cihazlarla calistirilabilir, dashboard ile canli izlenebilir ve opsiyonel olarak ESP32 gibi fiziksel cihazlara genisletilebilir.

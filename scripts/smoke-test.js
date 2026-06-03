@@ -3,17 +3,22 @@ const { spawn } = require("child_process");
 
 const coap = require("coap");
 
+const MQTT_PORT = Number(process.env.SMOKE_MQTT_PORT || 39183);
+const HTTP_PORT = Number(process.env.SMOKE_HTTP_PORT || 39300);
+const COAP_PORT = Number(process.env.SMOKE_COAP_PORT || 39683);
+const MQTT_URL = `mqtt://127.0.0.1:${MQTT_PORT}`;
 const children = [];
 
 function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function startProcess(name, args) {
+function startProcess(name, args, env = {}) {
   const child = spawn(process.execPath, args, {
     cwd: process.cwd(),
     env: {
-      ...process.env
+      ...process.env,
+      ...env
     },
     stdio: ["ignore", "pipe", "pipe"]
   });
@@ -30,7 +35,7 @@ function getJson(pathname) {
     const req = http.get(
       {
         hostname: "localhost",
-        port: 3000,
+        port: HTTP_PORT,
         path: pathname,
         timeout: 5000
       },
@@ -59,7 +64,7 @@ function getText(pathname) {
     const req = http.get(
       {
         hostname: "localhost",
-        port: 3000,
+        port: HTTP_PORT,
         path: pathname,
         timeout: 5000
       },
@@ -77,11 +82,53 @@ function getText(pathname) {
   });
 }
 
+function postJson(pathname, payload) {
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify(payload);
+    const req = http.request(
+      {
+        hostname: "localhost",
+        port: HTTP_PORT,
+        path: pathname,
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(body)
+        },
+        timeout: 5000
+      },
+      (res) => {
+        const chunks = [];
+        res.on("data", (chunk) => chunks.push(chunk));
+        res.on("end", () => {
+          const text = Buffer.concat(chunks).toString("utf8");
+
+          try {
+            resolve({
+              statusCode: res.statusCode,
+              body: JSON.parse(text)
+            });
+          } catch (error) {
+            reject(error);
+          }
+        });
+      }
+    );
+
+    req.on("timeout", () => {
+      req.destroy(new Error(`HTTP timeout for POST ${pathname}`));
+    });
+    req.on("error", reject);
+    req.write(body);
+    req.end();
+  });
+}
+
 function coapJson({ method, pathname, payload }) {
   return new Promise((resolve, reject) => {
     const req = coap.request({
       hostname: "localhost",
-      port: 5683,
+      port: COAP_PORT,
       pathname,
       method
     });
@@ -125,10 +172,17 @@ function stopChildren() {
 
 async function main() {
   console.log("Starting smoke test...");
-  startProcess("server", ["src/server.js"]);
+  startProcess("server", ["src/server.js"], {
+    DEVICE_TIMEOUT_MS: "2500",
+    MQTT_PORT: String(MQTT_PORT),
+    HTTP_PORT: String(HTTP_PORT),
+    COAP_PORT: String(COAP_PORT)
+  });
   await wait(3500);
 
-  startProcess("device", ["src/virtual-device.js", "smoke-device"]);
+  const deviceProcess = startProcess("device", ["src/virtual-device.js", "smoke-device"], {
+    MQTT_URL
+  });
   await wait(6500);
 
   const devices = await getJson("/api/devices");
@@ -142,12 +196,26 @@ async function main() {
     throw new Error("smoke-device telemetry did not include light value");
   }
 
+  if (
+    typeof smokeDevice.decisionSupport?.score !== "number" ||
+    !smokeDevice.decisionSupport?.recommendedAction
+  ) {
+    throw new Error("smoke-device did not include decision support output");
+  }
+
   console.log(`HTTP API OK: ${devices.length} device(s) found`);
+  console.log(
+    `Decision support OK: ${smokeDevice.decisionSupport.riskLevel}, score ${smokeDevice.decisionSupport.score}`
+  );
 
   const summary = await getJson("/api/summary");
 
   if (summary.totalDevices < 1 || typeof summary.onlineDevices !== "number") {
     throw new Error("HTTP summary did not include expected device counts");
+  }
+
+  if (!summary.decisionEngine || !summary.conservationProfiles?.mixedCollection) {
+    throw new Error("HTTP summary did not include decision support metadata");
   }
 
   console.log(
@@ -190,6 +258,41 @@ async function main() {
 
   console.log("CoAP control OK: actuator command sent");
   await wait(2000);
+
+  deviceProcess.kill("SIGINT");
+  await wait(3500);
+
+  const offlineDevice = await getJson("/api/devices/smoke-device");
+
+  if (offlineDevice.connection.online) {
+    throw new Error("smoke-device did not become offline after telemetry stopped");
+  }
+
+  const offlineHttpControl = await postJson("/api/devices/smoke-device/control", {
+    led: false
+  });
+
+  if (offlineHttpControl.statusCode !== 409 || offlineHttpControl.body.ok !== false) {
+    throw new Error("HTTP control did not reject an offline actuator command");
+  }
+
+  if (offlineHttpControl.body.twin?.desired?.led !== true) {
+    throw new Error("Offline HTTP control changed desired actuator state");
+  }
+
+  console.log("HTTP offline control OK: actuator command rejected");
+
+  const offlineCoapControl = await coapJson({
+    method: "POST",
+    pathname: "/devices/smoke-device/control",
+    payload: { led: false }
+  });
+
+  if (offlineCoapControl.ok !== false) {
+    throw new Error("CoAP control did not reject an offline actuator command");
+  }
+
+  console.log("CoAP offline control OK: actuator command rejected");
   console.log("Smoke test passed.");
 }
 

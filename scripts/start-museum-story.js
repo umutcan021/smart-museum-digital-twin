@@ -9,7 +9,7 @@ const demoDevices = [
     id: "archive-1",
     env: {
       BATTERY_SHUTDOWN: "true",
-      BATTERY_DRAIN_STEP: process.env.ARCHIVE_BATTERY_DRAIN_STEP || "10",
+      BATTERY_DRAIN_STEP: process.env.ARCHIVE_BATTERY_DRAIN_STEP || "4",
       DEVICE_PROFILE: "archive"
     }
   },
@@ -53,9 +53,11 @@ function stopAll() {
 
 console.log("Starting Smart Museum story demo:");
 console.log("- gallery-1 stays mostly normal.");
-console.log("- archive-1 has humidity risk and battery drain.");
+console.log("- archive-1 has humidity risk and gradual battery drain.");
 console.log("- exhibit-1 has high light exposure risk.");
 console.log("- entrance-1 simulates access/motion events.");
+console.log("- archive-1 battery lasts about 75 seconds by default.");
+console.log("  Set ARCHIVE_BATTERY_DRAIN_STEP=2 for a slower presentation.");
 console.log("Press Ctrl+C to stop all story devices.");
 
 for (const device of demoDevices) {

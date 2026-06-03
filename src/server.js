@@ -15,11 +15,58 @@ const DEVICE_TIMEOUT_MS = Number(process.env.DEVICE_TIMEOUT_MS || 12000);
 const STATUS_SWEEP_INTERVAL_MS = Number(process.env.STATUS_SWEEP_INTERVAL_MS || 2000);
 
 const ALERT_THRESHOLDS = {
-  temperatureHigh: Number(process.env.TEMPERATURE_HIGH || 26),
-  humidityHigh: Number(process.env.HUMIDITY_HIGH || 60),
-  humidityLow: Number(process.env.HUMIDITY_LOW || 35),
-  lightHigh: Number(process.env.LIGHT_HIGH || 800),
+  temperatureHigh: Number(process.env.TEMPERATURE_HIGH || 25),
+  humidityHigh: Number(process.env.HUMIDITY_HIGH || 55),
+  humidityLow: Number(process.env.HUMIDITY_LOW || 45),
+  lightHigh: Number(process.env.LIGHT_HIGH || 150),
   batteryLow: Number(process.env.BATTERY_LOW || 20)
+};
+
+const CONSERVATION_PROFILES = {
+  mixedCollection: {
+    id: "mixedCollection",
+    label: "Mixed museum collection",
+    temperature: { min: 15, target: 21, max: 25, severeHigh: 30 },
+    humidity: { min: 45, target: 50, max: 55, damp: 65 },
+    light: { maxLux: 150, severeLux: 300 },
+    sources: [
+      "CCI incorrect RH: general museums, galleries, libraries and archives use 50% RH and 15-25C as a design range.",
+      "CCI basic care of books: display/store books at maximum 150 lux."
+    ]
+  },
+  archivePaper: {
+    id: "archivePaper",
+    label: "Archive and paper storage",
+    temperature: { min: 10, target: 18, max: 25, severeHigh: 30 },
+    humidity: { min: 30, target: 40, max: 50, damp: 65 },
+    light: { maxLux: 150, severeLux: 300 },
+    sources: [
+      "CCI incorrect RH: cool archive storage benefits from 30-50% RH.",
+      "CCI basic care of books: light damage is cumulative; maximum 150 lux for books."
+    ]
+  },
+  sensitiveOrganic: {
+    id: "sensitiveOrganic",
+    label: "Light-sensitive organic exhibit",
+    temperature: { min: 15, target: 21, max: 25, severeHigh: 30 },
+    humidity: { min: 45, target: 50, max: 55, damp: 65 },
+    light: { maxLux: 50, severeLux: 150 },
+    sources: [
+      "CCI mounted specimens and pelts: recommended RH is 45-55%, avoid temperatures above 25C.",
+      "CCI mounted specimens and pelts: light-sensitive fur and feathers should not exceed 50 lux."
+    ]
+  },
+  accessMonitoring: {
+    id: "accessMonitoring",
+    label: "Entrance access monitoring",
+    temperature: { min: 15, target: 21, max: 25, severeHigh: 30 },
+    humidity: { min: 35, target: 45, max: 60, damp: 65 },
+    light: { maxLux: 150, severeLux: 300 },
+    sources: [
+      "CCI incorrect RH: RH control is handled as risk management for the collection type.",
+      "Access motion is treated as a security/reliability signal rather than a conservation standard."
+    ]
+  }
 };
 
 const MQTT_URL = `mqtt://127.0.0.1:${MQTT_PORT}`;
@@ -72,6 +119,13 @@ function ensureTwin(deviceId, metadata = {}) {
         lastCommandAt: null,
         lastReportedAt: null
       },
+      decisionSupport: {
+        engine: "rule-based conservation decision support",
+        score: 0,
+        riskLevel: "Waiting",
+        recommendedAction: "Waiting for telemetry.",
+        factors: []
+      },
       alerts: [],
       history: [],
       createdAt: timestamp(),
@@ -91,75 +145,161 @@ function emitTwins() {
   io.emit("twins:update", getAllTwins());
 }
 
-function buildAlerts(twin) {
-  const alerts = [];
+function conservationProfileForTwin(twin) {
+  const type = String(twin.type || "").toLowerCase();
+  const deviceId = String(twin.deviceId || "").toLowerCase();
+
+  if (type.includes("archive") || deviceId.includes("archive")) return CONSERVATION_PROFILES.archivePaper;
+  if (type.includes("exhibit") || deviceId.includes("exhibit")) return CONSERVATION_PROFILES.sensitiveOrganic;
+  if (type.includes("access") || deviceId.includes("entrance") || deviceId.includes("door")) {
+    return CONSERVATION_PROFILES.accessMonitoring;
+  }
+
+  return CONSERVATION_PROFILES.mixedCollection;
+}
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function rangeText(range, suffix) {
+  return `${range.min}-${range.max}${suffix}`;
+}
+
+function riskLevelForScore(score) {
+  if (score >= 75) return "Critical Risk";
+  if (score >= 45) return "High Risk";
+  if (score >= 20) return "Moderate Risk";
+  return "Low Risk";
+}
+
+function addDecisionFactor(factors, factor) {
+  factors.push({
+    at: factor.at || timestamp(),
+    score: factor.score,
+    code: factor.code,
+    level: factor.level,
+    message: factor.message,
+    recommendation: factor.recommendation
+  });
+}
+
+function buildDecisionSupport(twin) {
   const telemetry = twin.telemetry || {};
+  const profile = conservationProfileForTwin(twin);
+  const factors = [];
   const now = timestamp();
 
   if (!twin.connection.online) {
-    alerts.push({
+    addDecisionFactor(factors, {
       code: "DEVICE_OFFLINE",
       level: "warning",
+      score: 35,
       message: twin.connection.offlineReason || "Device is offline",
+      recommendation: "Check sensor power, battery, and local network connectivity before trusting this zone.",
       at: now
     });
   }
 
-  if (
-    typeof telemetry.temperature === "number" &&
-    telemetry.temperature >= ALERT_THRESHOLDS.temperatureHigh
-  ) {
-    alerts.push({
-      code: "HIGH_TEMPERATURE",
-      level: "critical",
-      message: `Temperature is ${telemetry.temperature}C`,
-      at: telemetry.receivedAt || now
-    });
+  if (typeof telemetry.temperature === "number") {
+    if (telemetry.temperature > profile.temperature.max) {
+      const severe = telemetry.temperature >= profile.temperature.severeHigh;
+      addDecisionFactor(factors, {
+        code: "HIGH_TEMPERATURE",
+        level: severe ? "critical" : "warning",
+        score: clamp(Math.round((telemetry.temperature - profile.temperature.max) * 4) + 8, 8, severe ? 28 : 18),
+        message: `Temperature is ${telemetry.temperature}C; target range is ${rangeText(profile.temperature, "C")}.`,
+        recommendation: "Reduce heat load, inspect HVAC cooling, and avoid spotlight heat near objects.",
+        at: telemetry.receivedAt || now
+      });
+    } else if (telemetry.temperature < profile.temperature.min) {
+      addDecisionFactor(factors, {
+        code: "LOW_TEMPERATURE",
+        level: "warning",
+        score: clamp(Math.round((profile.temperature.min - telemetry.temperature) * 3) + 6, 6, 16),
+        message: `Temperature is ${telemetry.temperature}C; target range is ${rangeText(profile.temperature, "C")}.`,
+        recommendation: "Avoid rapid temperature changes and verify that RH remains stable.",
+        at: telemetry.receivedAt || now
+      });
+    }
   }
 
-  if (typeof telemetry.humidity === "number" && telemetry.humidity >= ALERT_THRESHOLDS.humidityHigh) {
-    alerts.push({
-      code: "HIGH_HUMIDITY",
-      level: "warning",
-      message: `Humidity is ${telemetry.humidity}%`,
-      at: telemetry.receivedAt || now
-    });
+  if (typeof telemetry.humidity === "number") {
+    if (telemetry.humidity >= profile.humidity.damp) {
+      addDecisionFactor(factors, {
+        code: "DAMP_MOULD_RISK",
+        level: "critical",
+        score: 30,
+        message: `RH is ${telemetry.humidity}%; damp/mould danger threshold is ${profile.humidity.damp}%.`,
+        recommendation: "Start dehumidification, inspect ventilation, and check for condensation or leaks.",
+        at: telemetry.receivedAt || now
+      });
+    } else if (telemetry.humidity > profile.humidity.max) {
+      addDecisionFactor(factors, {
+        code: "HIGH_HUMIDITY",
+        level: "warning",
+        score: clamp(Math.round((telemetry.humidity - profile.humidity.max) * 2) + 8, 8, 22),
+        message: `RH is ${telemetry.humidity}%; target range is ${rangeText(profile.humidity, "%")}.`,
+        recommendation: "Lower RH gradually and inspect room ventilation or dehumidifier operation.",
+        at: telemetry.receivedAt || now
+      });
+    } else if (telemetry.humidity < profile.humidity.min) {
+      addDecisionFactor(factors, {
+        code: "LOW_HUMIDITY",
+        level: "warning",
+        score: clamp(Math.round((profile.humidity.min - telemetry.humidity) * 2) + 8, 8, 22),
+        message: `RH is ${telemetry.humidity}%; target range is ${rangeText(profile.humidity, "%")}.`,
+        recommendation: "Increase humidity control gradually and avoid rapid RH swings.",
+        at: telemetry.receivedAt || now
+      });
+    }
   }
 
-  if (typeof telemetry.humidity === "number" && telemetry.humidity <= ALERT_THRESHOLDS.humidityLow) {
-    alerts.push({
-      code: "LOW_HUMIDITY",
-      level: "warning",
-      message: `Humidity is ${telemetry.humidity}%`,
-      at: telemetry.receivedAt || now
-    });
-  }
-
-  if (typeof telemetry.light === "number" && telemetry.light >= ALERT_THRESHOLDS.lightHigh) {
-    alerts.push({
+  if (typeof telemetry.light === "number" && telemetry.light > profile.light.maxLux) {
+    const severe = telemetry.light >= profile.light.severeLux;
+    addDecisionFactor(factors, {
       code: "HIGH_LIGHT_EXPOSURE",
-      level: "critical",
-      message: `Light exposure is ${telemetry.light} lx`,
+      level: severe ? "critical" : "warning",
+      score: clamp(Math.round((telemetry.light - profile.light.maxLux) / 8) + 8, 8, severe ? 26 : 18),
+      message: `Light is ${telemetry.light} lx; recommended maximum is ${profile.light.maxLux} lx for this zone.`,
+      recommendation: "Reduce light level, shorten exposure time, and use protective lighting mode.",
       at: telemetry.receivedAt || now
     });
   }
 
   if (telemetry.motion === true) {
-    alerts.push({
+    addDecisionFactor(factors, {
       code: "MOTION_DETECTED",
-      level: "warning",
-      message: "Motion/access activity detected",
+      level: twin.type === "museum-access-sensor" ? "warning" : "info",
+      score: twin.type === "museum-access-sensor" ? 8 : 5,
+      message: "Motion/access activity detected.",
+      recommendation: "Verify whether the movement is an expected access event.",
       at: telemetry.receivedAt || now
     });
   }
 
-  if (typeof telemetry.battery === "number" && telemetry.battery <= ALERT_THRESHOLDS.batteryLow) {
-    alerts.push({
-      code: "LOW_BATTERY",
-      level: "warning",
-      message: `Battery is ${telemetry.battery}%`,
-      at: telemetry.receivedAt || now
-    });
+  if (typeof telemetry.battery === "number") {
+    const criticalBattery = Math.max(5, Math.round(ALERT_THRESHOLDS.batteryLow * 0.25));
+
+    if (telemetry.battery <= criticalBattery) {
+      addDecisionFactor(factors, {
+        code: "BATTERY_CRITICAL",
+        level: "critical",
+        score: 25,
+        message: `Battery is ${telemetry.battery}%; sensor may stop reporting soon.`,
+        recommendation: "Replace or recharge the sensor battery immediately.",
+        at: telemetry.receivedAt || now
+      });
+    } else if (telemetry.battery <= ALERT_THRESHOLDS.batteryLow) {
+      addDecisionFactor(factors, {
+        code: "LOW_BATTERY",
+        level: "warning",
+        score: 12,
+        message: `Battery is ${telemetry.battery}%; low battery threshold is ${ALERT_THRESHOLDS.batteryLow}%.`,
+        recommendation: "Schedule battery replacement before telemetry is lost.",
+        at: telemetry.receivedAt || now
+      });
+    }
   }
 
   if (
@@ -167,22 +307,68 @@ function buildAlerts(twin) {
     typeof twin.desired.led === "boolean" &&
     twin.desired.led !== twin.reported.led
   ) {
-    alerts.push({
+    addDecisionFactor(factors, {
       code: "STATE_SYNC_PENDING",
       level: "info",
+      score: 5,
       message: "Desired actuator state has not been reported by the device yet",
+      recommendation: "Wait for the next telemetry report before assuming actuator state changed.",
       at: twin.sync.lastCommandAt || now
     });
   }
 
-  return alerts;
+  const score = clamp(
+    factors.reduce((total, factor) => total + factor.score, 0),
+    0,
+    100
+  );
+  const sortedFactors = [...factors].sort((a, b) => b.score - a.score);
+  const primaryFactor = sortedFactors[0];
+
+  return {
+    engine: "rule-based conservation decision support",
+    generatedAt: now,
+    profile: {
+      id: profile.id,
+      label: profile.label
+    },
+    score,
+    riskLevel: riskLevelForScore(score),
+    recommendedAction: primaryFactor
+      ? primaryFactor.recommendation
+      : "Conditions are inside the selected conservation profile; continue monitoring.",
+    explanation: primaryFactor
+      ? sortedFactors.map((factor) => factor.message).join(" ")
+      : "No active conservation or reliability risk factors were detected.",
+    standards: {
+      temperatureRangeC: rangeText(profile.temperature, "C"),
+      relativeHumidityRange: rangeText(profile.humidity, "%"),
+      dampMouldRiskAt: `${profile.humidity.damp}% RH`,
+      lightMaxLux: profile.light.maxLux,
+      batteryLowPercent: ALERT_THRESHOLDS.batteryLow,
+      sources: profile.sources
+    },
+    factors: sortedFactors
+  };
+}
+
+function buildAlerts(decisionSupport) {
+  return (decisionSupport.factors || []).map((factor) => ({
+    code: factor.code,
+    level: factor.level,
+    message: factor.message,
+    recommendation: factor.recommendation,
+    scoreContribution: factor.score,
+    at: factor.at
+  }));
 }
 
 function updateTwinDerivedState(twin, nowMs = Date.now()) {
   const previous = JSON.stringify({
     connection: twin.connection,
     sync: twin.sync,
-    alerts: twin.alerts
+    alerts: twin.alerts,
+    decisionSupport: twin.decisionSupport
   });
   const lastMessageMs = twin.connection.lastMessageAt
     ? Date.parse(twin.connection.lastMessageAt)
@@ -216,14 +402,16 @@ function updateTwinDerivedState(twin, nowMs = Date.now()) {
     twin.sync.state = "pending";
   }
 
-  twin.alerts = buildAlerts(twin);
+  twin.decisionSupport = buildDecisionSupport(twin);
+  twin.alerts = buildAlerts(twin.decisionSupport);
 
   return (
     previous !==
     JSON.stringify({
       connection: twin.connection,
       sync: twin.sync,
-      alerts: twin.alerts
+      alerts: twin.alerts,
+      decisionSupport: twin.decisionSupport
     })
   );
 }
@@ -249,6 +437,11 @@ function getSummary() {
       ...alert
     }))
   );
+  const riskLevels = devices.reduce((levels, device) => {
+    const level = device.decisionSupport?.riskLevel || "Waiting";
+    levels[level] = (levels[level] || 0) + 1;
+    return levels;
+  }, {});
 
   return {
     generatedAt: timestamp(),
@@ -257,7 +450,21 @@ function getSummary() {
     offlineDevices: devices.filter((device) => !device.connection.online).length,
     alertCount: alerts.length,
     alerts,
+    riskLevels,
     thresholds: ALERT_THRESHOLDS,
+    decisionEngine: "rule-based conservation decision support",
+    conservationProfiles: Object.fromEntries(
+      Object.entries(CONSERVATION_PROFILES).map(([key, profile]) => [
+        key,
+        {
+          label: profile.label,
+          temperatureRangeC: rangeText(profile.temperature, "C"),
+          relativeHumidityRange: rangeText(profile.humidity, "%"),
+          lightMaxLux: profile.light.maxLux,
+          sources: profile.sources
+        }
+      ])
+    ),
     timeoutSeconds: Math.round(DEVICE_TIMEOUT_MS / 1000)
   };
 }
@@ -310,9 +517,57 @@ function applyStatus(deviceId, payload) {
   emitTwins();
 }
 
+function validateControlCommand(deviceId, command) {
+  const twin = twins.get(deviceId);
+
+  if (!twin) {
+    return {
+      httpStatus: 404,
+      coapCode: "4.04",
+      error: "Device not found"
+    };
+  }
+
+  updateTwinDerivedState(twin);
+
+  if (typeof command.led !== "boolean") {
+    return {
+      httpStatus: 400,
+      coapCode: "4.00",
+      error: "Unsupported control command",
+      expected: {
+        led: "boolean"
+      },
+      twin: cloneTwin(twin)
+    };
+  }
+
+  if (!twin.connection.online) {
+    return {
+      httpStatus: 409,
+      coapCode: "4.09",
+      error: "Device is offline; actuator command was not sent",
+      reason: twin.connection.offlineReason || "Device is offline",
+      twin: cloneTwin(twin)
+    };
+  }
+
+  return null;
+}
+
+function controlRejectionPayload(rejection) {
+  return {
+    ok: false,
+    error: rejection.error,
+    reason: rejection.reason,
+    expected: rejection.expected,
+    twin: rejection.twin
+  };
+}
+
 function publishCommand(deviceId, command) {
   const now = timestamp();
-  const twin = ensureTwin(deviceId);
+  const twin = twins.get(deviceId);
   const normalizedCommand = {
     ...command,
     sentAt: now
@@ -401,10 +656,18 @@ app.get("/api/summary", (req, res) => {
 
 app.post("/api/devices/:deviceId/control", (req, res) => {
   const command = req.body || {};
+  const rejection = validateControlCommand(req.params.deviceId, command);
+
+  if (rejection) {
+    res.status(rejection.httpStatus).json(controlRejectionPayload(rejection));
+    return;
+  }
+
   const twin = publishCommand(req.params.deviceId, command);
 
   res.json({
     ok: true,
+    status: "Command sent; waiting for device report",
     command,
     twin
   });
@@ -470,10 +733,18 @@ const coapServer = coap.createServer((req, res) => {
       segments[2] === "control"
     ) {
       const command = parseJson(body, {});
+      const rejection = validateControlCommand(segments[1], command);
+
+      if (rejection) {
+        sendCoapJson(res, rejection.coapCode, controlRejectionPayload(rejection));
+        return;
+      }
+
       const twin = publishCommand(segments[1], command);
 
       sendCoapJson(res, "2.04", {
         ok: true,
+        status: "Command sent; waiting for device report",
         command,
         twin
       });

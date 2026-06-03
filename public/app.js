@@ -3,6 +3,7 @@ const socket = io();
 const state = {
   devices: [],
   selectedDeviceId: null,
+  controlNotice: null,
   thresholds: {
     temperatureHigh: 26,
     humidityHigh: 60,
@@ -37,6 +38,8 @@ const elements = {
   riskScoreValue: document.querySelector("#risk-score-value"),
   riskScoreLabel: document.querySelector("#risk-score-label"),
   riskScoreReasons: document.querySelector("#risk-score-reasons"),
+  riskScoreAction: document.querySelector("#risk-score-action"),
+  riskScoreStandards: document.querySelector("#risk-score-standards"),
   scene: document.querySelector("#museum-scene"),
   sceneRiskLabel: document.querySelector("#scene-risk-label"),
   sceneZoneLabel: document.querySelector("#scene-zone-label"),
@@ -48,6 +51,7 @@ const elements = {
   chartEmpty: document.querySelector("#chart-empty"),
   alerts: document.querySelector("#alert-list"),
   rawJson: document.querySelector("#raw-json"),
+  controlStatus: document.querySelector("#control-status"),
   ledOn: document.querySelector("#led-on"),
   ledOff: document.querySelector("#led-off")
 };
@@ -127,6 +131,8 @@ function riskCountText(count) {
 }
 
 function recommendedActionForAlert(alert) {
+  if (alert.recommendation) return alert.recommendation;
+
   switch (alert.code) {
     case "DEVICE_OFFLINE":
       return "Check sensor power source and local network connectivity for this zone.";
@@ -145,6 +151,25 @@ function recommendedActionForAlert(alert) {
     default:
       return "Inspect zone conditions and validate sensor readings.";
   }
+}
+
+function decisionSupportForDevice(device) {
+  if (device?.decisionSupport) return device.decisionSupport;
+
+  const fallback = calculateRiskScore(device);
+  return {
+    score: fallback.score,
+    riskLevel: fallback.label,
+    recommendedAction: "Inspect zone conditions and validate sensor readings.",
+    explanation: fallback.reasons.join(", ") || "No score factors yet.",
+    factors: fallback.reasons.map((reason) => ({
+      message: reason
+    })),
+    profile: {
+      label: "Fallback profile"
+    },
+    standards: null
+  };
 }
 
 function calculateRiskScore(device) {
@@ -233,11 +258,14 @@ function percent(value, min, max) {
   return Math.max(0, Math.min(100, ((value - min) / (max - min)) * 100));
 }
 
-function humidityRiskPercent(value) {
+function humidityRiskPercent(value, standards) {
   if (typeof value !== "number") return 0;
+  const range = standards?.relativeHumidityRange?.match(/(\d+(?:\.\d+)?)-(\d+(?:\.\d+)?)%/);
+  const low = range ? Number(range[1]) : 35;
+  const high = range ? Number(range[2]) : 60;
 
-  if (value < 35) return percent(35 - value, 0, 25);
-  if (value > 60) return percent(value - 60, 0, 25);
+  if (value < low) return percent(low - value, 0, 25);
+  if (value > high) return percent(value - high, 0, 25);
 
   return 0;
 }
@@ -333,12 +361,14 @@ function renderMuseumScene(device) {
   }
 
   const riskClass = riskClassForDevice(device);
+  const decision = decisionSupportForDevice(device);
   const light = device.telemetry.light;
   const humidity = device.telemetry.humidity;
-  const actuatorOn = Boolean(device.reported.led || device.desired.led);
+  const actuatorOn = device.reported.led === true;
+  const lightMax = Number(decision.standards?.lightMaxLux || 150);
   const lightExposureRisk =
-    typeof light === "number" ? Math.max(0, Math.min(100, ((light - 300) / 600) * 100)) : 0;
-  const humidityRisk = humidityRiskPercent(humidity);
+    typeof light === "number" ? Math.max(0, Math.min(100, ((light - lightMax) / lightMax) * 100)) : 0;
+  const humidityRisk = humidityRiskPercent(humidity, decision.standards);
 
   elements.scene.className = `museum-scene ${riskClass}`;
   elements.sceneRiskLabel.textContent = riskLabelForDevice(device);
@@ -349,6 +379,53 @@ function renderMuseumScene(device) {
   elements.sceneHumidityBar.style.width = `${humidityRisk}%`;
   elements.sceneLightBar.className = `bar-level-${riskBucket(lightExposureRisk)}`;
   elements.sceneHumidityBar.className = `bar-level-${riskBucket(humidityRisk)}`;
+}
+
+function renderControlState(device) {
+  const hasOnlineDevice = Boolean(device?.connection?.online);
+
+  elements.ledOn.disabled = !hasOnlineDevice;
+  elements.ledOff.disabled = !hasOnlineDevice;
+
+  if (!device) {
+    elements.controlStatus.textContent = "Waiting for sensor telemetry.";
+    elements.controlStatus.className = "control-status";
+    return;
+  }
+
+  if (
+    state.controlNotice &&
+    state.controlNotice.deviceId === device.deviceId &&
+    state.controlNotice.expiresAt > Date.now()
+  ) {
+    elements.controlStatus.textContent = state.controlNotice.text;
+    elements.controlStatus.className = `control-status ${state.controlNotice.type}`;
+    return;
+  }
+
+  state.controlNotice = null;
+
+  if (!device.connection.online) {
+    elements.controlStatus.textContent =
+      device.connection.offlineReason || "Sensor is offline; actuator command is unavailable.";
+    elements.controlStatus.className = "control-status error";
+    return;
+  }
+
+  if (device.sync?.state === "pending") {
+    elements.controlStatus.textContent = "Command sent; waiting for reported actuator state.";
+    elements.controlStatus.className = "control-status pending";
+    return;
+  }
+
+  if (device.reported.led === null || device.reported.led === undefined) {
+    elements.controlStatus.textContent = "Waiting for reported actuator state.";
+    elements.controlStatus.className = "control-status pending";
+    return;
+  }
+
+  elements.controlStatus.textContent = `Actuator reported ${boolText(device.reported.led)}.`;
+  elements.controlStatus.className = "control-status ok";
 }
 
 function riskBucket(value) {
@@ -454,8 +531,11 @@ function renderDetails() {
     elements.riskScoreValue.textContent = "-";
     elements.riskScoreLabel.textContent = "waiting";
     elements.riskScoreReasons.textContent = "No score factors yet.";
+    elements.riskScoreAction.textContent = "Waiting for recommendation.";
+    elements.riskScoreStandards.textContent = "No conservation profile loaded.";
     elements.alerts.innerHTML = `<div class="alert-item ok">Waiting for museum sensor data.</div>`;
     elements.rawJson.textContent = "{}";
+    renderControlState(null);
     renderMuseumScene(null);
     renderChart(null);
     return;
@@ -486,13 +566,19 @@ function renderDetails() {
   elements.lastSeen.textContent = device.connection.ageSeconds === null ? "-" : `${device.connection.ageSeconds}s ago`;
   elements.desired.textContent = boolText(device.desired.led);
   elements.reported.textContent = boolText(device.reported.led);
-  const riskScore = calculateRiskScore(device);
-  elements.riskScoreValue.textContent = `${riskScore.score} / 100`;
-  elements.riskScoreLabel.textContent = riskScore.label;
+  renderControlState(device);
+  const decision = decisionSupportForDevice(device);
+  const factors = decision.factors || [];
+  elements.riskScoreValue.textContent = `${decision.score} / 100`;
+  elements.riskScoreLabel.textContent = decision.riskLevel;
   elements.riskScoreReasons.textContent =
-    riskScore.reasons.length > 0
-      ? `Score factors: ${riskScore.reasons.slice(0, 3).join(", ")}`
-      : "Score factors: zone is within normal thresholds.";
+    factors.length > 0
+      ? `Decision factors: ${factors.slice(0, 3).map((factor) => factor.message).join(" ")}`
+      : decision.explanation || "No active conservation or reliability risk factors were detected.";
+  elements.riskScoreAction.textContent = `Recommended action: ${decision.recommendedAction}`;
+  elements.riskScoreStandards.textContent = decision.standards
+    ? `Profile: ${decision.profile?.label || "Conservation profile"} | Temp ${decision.standards.temperatureRangeC}, RH ${decision.standards.relativeHumidityRange}, Light <=${decision.standards.lightMaxLux} lx`
+    : `Profile: ${decision.profile?.label || "Fallback profile"}`;
   elements.rawJson.textContent = JSON.stringify(device, null, 2);
 
   renderMuseumScene(device);
@@ -545,13 +631,39 @@ async function sendActuatorCommand(led) {
 
   if (!device) return;
 
-  await fetch(`/api/devices/${device.deviceId}/control`, {
+  if (!device.connection.online) {
+    state.controlNotice = {
+      deviceId: device.deviceId,
+      type: "error",
+      text: device.connection.offlineReason || "Sensor is offline; command was not sent.",
+      expiresAt: Date.now() + 5000
+    };
+    renderDetails();
+    return;
+  }
+
+  const response = await fetch(`/api/devices/${device.deviceId}/control`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
     },
     body: JSON.stringify({ led })
   });
+  const payload = await response.json().catch(() => ({}));
+
+  if (!response.ok || payload.ok === false) {
+    state.controlNotice = {
+      deviceId: device.deviceId,
+      type: "error",
+      text: payload.reason || payload.error || "Command was rejected.",
+      expiresAt: Date.now() + 5000
+    };
+    await loadDevices().catch(() => renderDetails());
+    return;
+  }
+
+  state.controlNotice = null;
+  await loadDevices();
 }
 
 socket.on("twins:update", (devices) => {

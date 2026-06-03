@@ -55,6 +55,14 @@ button:hover {
   transform: translateY(-1px);
 }
 
+button:disabled,
+button:disabled:hover {
+  cursor: not-allowed;
+  opacity: 0.46;
+  transform: none;
+  box-shadow: none;
+}
+
 code {
   border-radius: 8px;
   padding: 0.1rem 0.35rem;
@@ -79,9 +87,9 @@ code {
   max-width: 760px;
   margin: 0;
   font-family: Georgia, "Times New Roman", serif;
-  font-size: clamp(2.4rem, 5.8vw, 5.5rem);
-  line-height: 0.88;
-  letter-spacing: -0.08em;
+  font-size: 4.4rem;
+  line-height: 0.95;
+  letter-spacing: 0;
 }
 
 .hero-text {
@@ -148,8 +156,8 @@ code {
 .summary-card strong {
   display: block;
   margin-top: 8px;
-  font-size: clamp(1.8rem, 4vw, 3rem);
-  letter-spacing: -0.06em;
+  font-size: 2.6rem;
+  letter-spacing: 0;
 }
 
 .summary-card.warning strong {
@@ -191,9 +199,9 @@ code {
 
 .command-head h2 {
   font-family: Georgia, "Times New Roman", serif;
-  font-size: clamp(2rem, 4.8vw, 4.4rem);
-  line-height: 0.95;
-  letter-spacing: -0.07em;
+  font-size: 3.3rem;
+  line-height: 1;
+  letter-spacing: 0;
 }
 
 .command-center .muted,
@@ -515,8 +523,8 @@ code {
 .metric strong {
   display: block;
   margin-top: 12px;
-  font-size: clamp(1.6rem, 3.2vw, 2.6rem);
-  letter-spacing: -0.06em;
+  font-size: 2.1rem;
+  letter-spacing: 0;
 }
 
 .twin-grid {
@@ -551,7 +559,7 @@ code {
   display: block;
   margin-top: 6px;
   font-size: 1.55rem;
-  letter-spacing: -0.03em;
+  letter-spacing: 0;
 }
 
 .risk-score-card small {
@@ -566,6 +574,26 @@ code {
   color: var(--muted);
   font-size: 0.85rem;
   line-height: 1.45;
+}
+
+.risk-score-action,
+.risk-score-standards {
+  margin: 10px 0 0;
+  border-radius: 14px;
+  padding: 0.62rem 0.72rem;
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.risk-score-action {
+  color: #0b473a;
+  font-weight: 800;
+  background: rgba(0, 166, 118, 0.13);
+}
+
+.risk-score-standards {
+  color: #4c5f66;
+  background: rgba(16, 32, 39, 0.06);
 }
 
 .chart-card,
@@ -873,6 +901,36 @@ code {
   color: rgba(255, 255, 255, 0.7);
 }
 
+.control-status {
+  display: inline-block;
+  margin: 10px 0 0;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 12px;
+  padding: 0.48rem 0.64rem;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 0.82rem;
+  font-weight: 800;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.control-status.ok {
+  border-color: rgba(20, 195, 142, 0.46);
+  color: #dffcf3;
+  background: rgba(20, 195, 142, 0.16);
+}
+
+.control-status.pending {
+  border-color: rgba(242, 183, 5, 0.48);
+  color: #fff4ce;
+  background: rgba(242, 183, 5, 0.16);
+}
+
+.control-status.error {
+  border-color: rgba(214, 69, 69, 0.5);
+  color: #ffe3e3;
+  background: rgba(214, 69, 69, 0.2);
+}
+
 .button-row {
   display: flex;
   flex-wrap: wrap;
@@ -909,22 +967,78 @@ code {
   margin-bottom: 10px;
 }
 
-.notes {
+.evidence-section {
   margin-top: 24px;
+  border-top: 1px solid var(--line);
+  padding-top: 24px;
 }
 
-.steps {
+.evidence-head {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 12px;
+  grid-template-columns: minmax(260px, 0.7fr) minmax(320px, 1fr);
+  gap: 24px;
+  align-items: end;
+  margin-bottom: 16px;
 }
 
-.steps span {
+.evidence-head h2 {
+  margin: 0;
+  font-size: 1.85rem;
+}
+
+.evidence-head .muted {
+  max-width: 680px;
+  margin: 0;
+}
+
+.evidence-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.evidence-card {
+  min-height: 190px;
   border: 1px solid var(--line);
   border-radius: 22px;
-  padding: 14px;
+  padding: 18px;
+  background: rgba(255, 255, 255, 0.68);
+  box-shadow: 0 18px 45px rgba(16, 32, 39, 0.08);
+}
+
+.evidence-card span {
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  color: #0b473a;
+  font-size: 0.8rem;
+  font-weight: 900;
+  background: rgba(0, 166, 118, 0.15);
+}
+
+.evidence-card strong {
+  display: block;
+  margin-top: 16px;
+  font-size: 1.05rem;
+}
+
+.evidence-card p {
+  margin: 10px 0 14px;
   color: var(--muted);
-  background: rgba(255, 255, 255, 0.55);
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+
+.evidence-card small {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 0.36rem 0.58rem;
+  color: #294a53;
+  font-size: 0.76rem;
+  font-weight: 800;
+  background: rgba(16, 32, 39, 0.07);
 }
 
 @keyframes pulse {
@@ -960,8 +1074,17 @@ code {
   .twin-grid,
   .scene-bars,
   .zone-legend,
-  .steps {
+  .evidence-head,
+  .evidence-grid {
     grid-template-columns: 1fr;
+  }
+
+  .hero h1 {
+    font-size: 2.8rem;
+  }
+
+  .command-head h2 {
+    font-size: 2.35rem;
   }
 
   .command-stage,

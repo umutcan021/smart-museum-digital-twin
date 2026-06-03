@@ -70,6 +70,10 @@ telemetry.humidity
 telemetry.light
 telemetry.motion
 telemetry.battery
+decisionSupport.score
+decisionSupport.riskLevel
+decisionSupport.recommendedAction
+decisionSupport.standards
 desired.led
 reported.led
 sync.state
@@ -78,6 +82,68 @@ history
 ```
 
 In the dashboard, `desired.led` and `reported.led` are shown as the **Protection Actuator** state. The field name is still `led` in the JSON because the same command can represent a warning light, fan, dehumidifier, or protective lighting control.
+
+Important actuator behavior:
+
+```text
+desired.led   User/server target state
+reported.led  Last actuator state confirmed by the device
+```
+
+If a device is offline or its battery is depleted, actuator commands are rejected. This prevents the dashboard from showing a dead sensor as if it actually turned the actuator on. The visual room twin uses `reported.led` for the real actuator light, while `desired.led` remains only the requested target state.
+
+## Decision Support Engine
+
+The backend includes a rule-based conservation decision support engine. It evaluates every digital twin against a conservation profile and writes the result into `decisionSupport`.
+
+Each result contains:
+
+```text
+engine
+profile.id
+profile.label
+score
+riskLevel
+recommendedAction
+explanation
+standards
+factors
+```
+
+The score is not a machine-learning prediction. It is a transparent weighted rule score based on:
+
+```text
+temperature outside the profile range
+relative humidity outside the profile range
+damp/mould risk
+light above the profile lux limit
+motion/access activity
+low or critical sensor battery
+offline sensor state
+desired/reported actuator mismatch
+```
+
+The demo profiles are based on Canadian Conservation Institute guidance:
+
+```text
+Mixed museum collection:      15-25C, 45-55% RH, light <=150 lx
+Archive and paper storage:    10-25C, 30-50% RH, light <=150 lx
+Sensitive organic exhibit:    15-25C, 45-55% RH, light <=50 lx
+Entrance/access monitoring:   environmental monitoring + motion/access signal
+```
+
+Sources:
+
+```text
+Canadian Conservation Institute - Incorrect relative humidity
+https://www.canada.ca/en/conservation-institute/services/agents-deterioration/humidity.html
+
+Canadian Conservation Institute - Care of Mounted Specimens and Pelts
+https://www.canada.ca/en/conservation-institute/services/conservation-preservation-publications/canadian-conservation-institute-notes/care-mounted-specimens-pelts.html
+
+Canadian Conservation Institute - Basic Care of Books
+https://www.canada.ca/en/conservation-institute/services/conservation-preservation-publications/canadian-conservation-institute-notes/basic-care-books.html
+```
 
 ## Protocols and Ports
 
@@ -186,10 +252,17 @@ For the final presentation, the stronger story mode is recommended:
 npm.cmd run devices:museum-story
 ```
 
-Story mode starts the same four museum zones, but `archive-1` also demonstrates battery drain. This creates a clear sequence:
+Story mode starts the same four museum zones, but `archive-1` also demonstrates gradual battery drain. By default, `archive-1` lasts about 75 seconds so there is enough time to inspect the dashboard before the sensor goes offline. This creates a clear sequence:
 
 ```text
 normal telemetry -> LOW_BATTERY -> SENSOR OFFLINE -> digital twin update
+```
+
+For a slower presentation, start story mode like this:
+
+```powershell
+$env:ARCHIVE_BATTERY_DRAIN_STEP="2"
+npm.cmd run devices:museum-story
 ```
 
 ### Browser: Open Dashboard
@@ -237,6 +310,13 @@ node src/coap-client.js control gallery-1 led off
 ```
 
 The CoAP command reaches the server. The server forwards the command to the device through MQTT. The device then reports its new state back through MQTT telemetry.
+
+If the selected device is offline, the server rejects the command instead of changing the desired actuator state:
+
+```text
+HTTP API: 409 Conflict
+CoAP:     4.09 Conflict
+```
 
 ## Dashboard Sections
 
@@ -327,33 +407,35 @@ The demo uses a boolean `led` command internally because it is simple and easy t
 
 The dark JSON block shows the raw digital twin object. It is useful in a presentation because it proves that the backend is maintaining a real software-side twin, not only drawing values on the screen.
 
-## Alert Rules
+## Decision Rules
 
-Default demo thresholds:
+The system now uses profile-based conservation rules instead of one global demo threshold. The default profile limits are:
 
 ```text
-High temperature:   26 C
-High humidity:      60%
-Low humidity:       35%
-High light:         800 lx
-Low battery:        20%
-Offline timeout:    12 seconds
+Mixed collection:       15-25C, 45-55% RH, light <=150 lx
+Archive/paper storage:  10-25C, 30-50% RH, light <=150 lx
+Sensitive exhibit:      15-25C, 45-55% RH, light <=50 lx
+Low battery:            20%
+Offline timeout:        12 seconds
 ```
 
-Alert types:
+Decision factors and alert types include:
 
 ```text
 HIGH_TEMPERATURE
+LOW_TEMPERATURE
 HIGH_HUMIDITY
 LOW_HUMIDITY
+DAMP_MOULD_RISK
 HIGH_LIGHT_EXPOSURE
 MOTION_DETECTED
 LOW_BATTERY
+BATTERY_CRITICAL
 DEVICE_OFFLINE
 STATE_SYNC_PENDING
 ```
 
-These thresholds are demo thresholds. They should be presented as configurable example values, not as official museum conservation standards.
+These rules are simplified for a classroom demo, but the ranges and light limits are tied to conservation guidance rather than arbitrary random values.
 
 ## Battery / Sensor Reliability Demo
 
@@ -370,12 +452,14 @@ In this mode:
 ```text
 archive-1 starts online
 archive-1 reports humidity risk
-archive-1 battery decreases over time
+archive-1 battery decreases gradually for about 75 seconds
 archive-1 creates LOW_BATTERY alert
 archive-1 reaches 0%
 archive-1 sends offline status and stops telemetry
 3D scene turns archive sensor gray/offline
 ```
+
+The story demo is intentionally slower than the standalone battery demo. This gives enough time to explain the zone card, digital twin JSON, risk score, and actuator behavior before `archive-1` goes offline.
 
 There is also a separate standalone battery demo:
 

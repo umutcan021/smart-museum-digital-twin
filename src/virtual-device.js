@@ -7,22 +7,39 @@ const BATTERY_SHUTDOWN = parseBoolean(process.env.BATTERY_SHUTDOWN);
 const BATTERY_DRAIN_STEP = Number(process.env.BATTERY_DRAIN_STEP || 20);
 const BATTERY_START = Number(process.env.BATTERY_START || 100);
 
+let rngSeed = hashString(deviceId);
 let led = false;
 let messageCounter = 0;
 let telemetryTimer = null;
 let battery = BATTERY_START;
 let batteryDepleted = false;
-let temperature = randomBetween(profile().temperatureMin, profile().temperatureMax);
-let humidity = randomBetween(profile().humidityMin, profile().humidityMax);
-let light = randomBetween(profile().lightMin, profile().lightMax);
+let temperature = scenarioValue(profile().temperature);
+let humidity = scenarioValue(profile().humidity);
+let light = scenarioValue(profile().light);
 let motion = false;
 
 const client = mqtt.connect(MQTT_URL, {
   clientId: `${deviceId}-${Math.random().toString(16).slice(2)}`
 });
 
+function hashString(value) {
+  let hash = 2166136261;
+
+  for (const char of value) {
+    hash ^= char.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return hash >>> 0;
+}
+
+function seededRandom() {
+  rngSeed = (Math.imul(rngSeed, 1664525) + 1013904223) >>> 0;
+  return rngSeed / 4294967296;
+}
+
 function randomBetween(min, max) {
-  return Number((min + Math.random() * (max - min)).toFixed(1));
+  return Number((min + seededRandom() * (max - min)).toFixed(1));
 }
 
 function parseBoolean(value) {
@@ -43,55 +60,54 @@ function profile() {
     gallery: {
       name: `Gallery Zone ${deviceId}`,
       type: "museum-gallery-sensor",
-      temperatureMin: 21,
-      temperatureMax: 24,
-      humidityMin: 42,
-      humidityMax: 52,
-      lightMin: 260,
-      lightMax: 520,
-      motionChance: 0.05
+      conservationProfile: "mixedCollection",
+      temperature: { base: 21, amplitude: 0.8, noise: 0.2, min: 19.8, max: 22.4, period: 8, phase: 1 },
+      humidity: { base: 50, amplitude: 2.4, noise: 0.4, min: 46, max: 54, period: 10, phase: 2 },
+      light: { base: 125, amplitude: 22, noise: 4, min: 80, max: 155, period: 9, phase: 3 },
+      motionChance: 0.04,
+      simulationBasis: "CCI mixed museum profile: 15-25C, about 50% RH, low display light."
     },
     archive: {
       name: `Archive Zone ${deviceId}`,
       type: "museum-archive-sensor",
-      temperatureMin: 18.5,
-      temperatureMax: 22,
-      humidityMin: 61,
-      humidityMax: 68,
-      lightMin: 120,
-      lightMax: 300,
-      motionChance: 0.03
+      conservationProfile: "archivePaper",
+      temperature: { base: 18.5, amplitude: 0.9, noise: 0.2, min: 17.2, max: 20.2, period: 12, phase: 2 },
+      humidity: { base: 57, amplitude: 4.2, noise: 0.5, min: 52, max: 64, period: 9, phase: 4 },
+      light: { base: 45, amplitude: 10, noise: 3, min: 25, max: 70, period: 11, phase: 1 },
+      motionChance: 0.02,
+      simulationBasis: "Archive profile intentionally exceeds the 30-50% RH target to create a paper-storage humidity risk."
     },
     exhibit: {
       name: `Exhibit Case ${deviceId}`,
       type: "museum-exhibit-sensor",
-      temperatureMin: 25.5,
-      temperatureMax: 28.2,
-      humidityMin: 36,
-      humidityMax: 48,
-      lightMin: 820,
-      lightMax: 950,
-      motionChance: 0.08
+      conservationProfile: "sensitiveOrganic",
+      temperature: { base: 24.8, amplitude: 1.0, noise: 0.2, min: 23.8, max: 26.4, period: 10, phase: 0 },
+      humidity: { base: 50, amplitude: 2.2, noise: 0.4, min: 46, max: 54, period: 8, phase: 5 },
+      light: { base: 74, amplitude: 14, noise: 4, min: 52, max: 96, period: 7, phase: 2 },
+      motionChance: 0.06,
+      simulationBasis: "Sensitive exhibit profile uses a 50 lux light limit; readings intentionally exceed it."
     },
     entrance: {
       name: `Entrance Access ${deviceId}`,
       type: "museum-access-sensor",
-      temperatureMin: 20,
-      temperatureMax: 24,
-      humidityMin: 35,
-      humidityMax: 48,
-      lightMin: 180,
-      lightMax: 450,
-      motionChance: 0.65
+      conservationProfile: "accessMonitoring",
+      temperature: { base: 21.5, amplitude: 1.1, noise: 0.2, min: 19.5, max: 23.7, period: 7, phase: 3 },
+      humidity: { base: 45, amplitude: 3.5, noise: 0.5, min: 38, max: 52, period: 8, phase: 1 },
+      light: { base: 135, amplitude: 24, noise: 5, min: 85, max: 180, period: 6, phase: 4 },
+      motionChance: 0.58,
+      simulationBasis: "Entrance profile focuses on access activity while keeping environmental values near a mixed collection range."
     }
   };
 
   return profiles[DEVICE_PROFILE] || profiles.gallery;
 }
 
-function drift(value, min, max, step) {
-  const next = value + randomBetween(-step, step);
-  return Number(Math.min(max, Math.max(min, next)).toFixed(1));
+function scenarioValue(metricProfile) {
+  const wave = Math.sin((messageCounter + metricProfile.phase) / metricProfile.period);
+  const noise = randomBetween(-metricProfile.noise, metricProfile.noise);
+  const next = metricProfile.base + wave * metricProfile.amplitude + noise;
+
+  return Number(Math.min(metricProfile.max, Math.max(metricProfile.min, next)).toFixed(1));
 }
 
 function publishStatus(online, callback) {
@@ -101,6 +117,7 @@ function publishStatus(online, callback) {
       deviceId,
       name: profile().name,
       type: profile().type,
+      conservationProfile: profile().conservationProfile,
       online
     }),
     { retain: false },
@@ -110,8 +127,9 @@ function publishStatus(online, callback) {
 
 function nextBatteryLevel() {
   if (BATTERY_SHUTDOWN) {
+    const currentBattery = battery;
     battery = Math.max(0, battery - BATTERY_DRAIN_STEP);
-    return battery;
+    return currentBattery;
   }
 
   return Math.max(5, 100 - Math.floor(messageCounter / 5));
@@ -131,17 +149,19 @@ function shutdownBecauseBatteryEnded() {
 function publishTelemetry() {
   if (batteryDepleted) return;
 
-  temperature = drift(temperature, 18, 35, 0.7);
-  humidity = drift(humidity, 30, 75, 1.4);
-  light = drift(light, 60, 980, 38);
-  motion = Math.random() < profile().motionChance;
   messageCounter += 1;
+  temperature = scenarioValue(profile().temperature);
+  humidity = scenarioValue(profile().humidity);
+  light = scenarioValue(profile().light);
+  motion = seededRandom() < profile().motionChance;
   const currentBattery = nextBatteryLevel();
 
   const telemetry = {
     deviceId,
     name: profile().name,
     type: profile().type,
+    conservationProfile: profile().conservationProfile,
+    simulationBasis: profile().simulationBasis,
     temperature,
     humidity,
     light: Math.round(light),

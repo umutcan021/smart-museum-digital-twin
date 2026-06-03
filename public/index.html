@@ -142,10 +142,12 @@
           </div>
 
           <div class="risk-score-card">
-            <span>Preservation Risk Score</span>
+            <span>Decision Support Engine</span>
             <strong id="risk-score-value">-</strong>
             <small id="risk-score-label">waiting</small>
             <p id="risk-score-reasons" class="risk-score-reasons">No score factors yet.</p>
+            <p id="risk-score-action" class="risk-score-action">Waiting for recommendation.</p>
+            <p id="risk-score-standards" class="risk-score-standards">No conservation profile loaded.</p>
           </div>
 
           <div class="museum-twin-card">
@@ -207,6 +209,7 @@
               <p class="eyebrow">Control</p>
               <h3>Protection Actuator</h3>
               <p class="muted">Represents a warning light, ventilation fan, dehumidifier, or protective lighting control.</p>
+              <p id="control-status" class="control-status">Waiting for sensor telemetry.</p>
             </div>
             <div class="button-row">
               <button id="led-on" data-testid="led-on">Actuator ON</button>
@@ -221,15 +224,46 @@
         </article>
       </section>
 
-      <section class="panel notes">
-        <p class="eyebrow">Demo Flow</p>
-        <h2>Presentation Story</h2>
-        <div class="steps">
-          <span>1. Museum zone sensors publish temperature, humidity, light, motion, and battery telemetry via MQTT.</span>
-          <span>2. The backend updates a lightweight digital twin for each zone.</span>
-          <span>3. Dashboard visualizes preservation risks, sensor reliability, and recent telemetry.</span>
-          <span>4. CoAP provides lightweight query and protection actuator control.</span>
-          <span>5. Desired and reported actuator states stay synchronized in the digital twin.</span>
+      <section class="evidence-section">
+        <div class="evidence-head">
+          <div>
+            <p class="eyebrow">IoT Evidence</p>
+            <h2>Presentation Proof Points</h2>
+          </div>
+          <p class="muted">
+            The demo is strongest when these four signals are visible: live telemetry,
+            twin state, lightweight control, and failure handling.
+          </p>
+        </div>
+
+        <div class="evidence-grid">
+          <article class="evidence-card">
+            <span>01</span>
+            <strong>MQTT telemetry</strong>
+            <p>Temperature, humidity, light, motion, and battery data arrive as sensor messages.</p>
+            <small>Topic family: telemetry + status</small>
+          </article>
+
+          <article class="evidence-card">
+            <span>02</span>
+            <strong>Decision support</strong>
+            <p>The backend scores each twin against a conservation profile and recommends an action.</p>
+            <small>State: score, level, action</small>
+          </article>
+
+          <article class="evidence-card">
+            <span>03</span>
+            <strong>CoAP control</strong>
+            <p>Lightweight queries and actuator commands use the CoAP server path.</p>
+            <small>Routes: summary, devices, control</small>
+          </article>
+
+          <article class="evidence-card">
+            <span>04</span>
+            <strong>Fault handling</strong>
+            <p>Battery drain creates low-battery and offline states; offline actuator commands are rejected.</p>
+            <small>Scenario: archive-1 reliability</small>
+          </article>
         </div>
       </section>
     </main>
