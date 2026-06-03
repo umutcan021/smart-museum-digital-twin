@@ -99,6 +99,7 @@ function ensureTwin(deviceId, metadata = {}) {
       deviceId,
       name: metadata.name || deviceId,
       type: metadata.type || "unknown",
+      conservationProfile: metadata.conservationProfile || null,
       connection: {
         online: false,
         protocol: "mqtt",
@@ -137,6 +138,7 @@ function ensureTwin(deviceId, metadata = {}) {
 
   if (metadata.name) twin.name = metadata.name;
   if (metadata.type) twin.type = metadata.type;
+  if (metadata.conservationProfile) twin.conservationProfile = metadata.conservationProfile;
 
   return twin;
 }
@@ -146,6 +148,14 @@ function emitTwins() {
 }
 
 function conservationProfileForTwin(twin) {
+  const explicitProfile = String(
+    twin.conservationProfile || twin.telemetry?.conservationProfile || ""
+  ).trim();
+
+  if (CONSERVATION_PROFILES[explicitProfile]) {
+    return CONSERVATION_PROFILES[explicitProfile];
+  }
+
   const type = String(twin.type || "").toLowerCase();
   const deviceId = String(twin.deviceId || "").toLowerCase();
 
@@ -363,6 +373,10 @@ function buildAlerts(decisionSupport) {
   }));
 }
 
+function isRiskAlert(alert) {
+  return ["critical", "warning"].includes(alert.level);
+}
+
 function updateTwinDerivedState(twin, nowMs = Date.now()) {
   const previous = JSON.stringify({
     connection: twin.connection,
@@ -431,7 +445,7 @@ function refreshAllTwins({ emitIfChanged = false } = {}) {
 function getSummary() {
   const devices = getAllTwins();
   const alerts = devices.flatMap((device) =>
-    (device.alerts || []).map((alert) => ({
+    (device.alerts || []).filter(isRiskAlert).map((alert) => ({
       deviceId: device.deviceId,
       deviceName: device.name,
       ...alert
@@ -473,7 +487,8 @@ function applyTelemetry(deviceId, payload) {
   const now = timestamp();
   const twin = ensureTwin(deviceId, {
     name: payload.name,
-    type: payload.type
+    type: payload.type,
+    conservationProfile: payload.conservationProfile
   });
 
   twin.connection.online = true;
@@ -505,7 +520,8 @@ function applyStatus(deviceId, payload) {
   const now = timestamp();
   const twin = ensureTwin(deviceId, {
     name: payload.name,
-    type: payload.type
+    type: payload.type,
+    conservationProfile: payload.conservationProfile
   });
 
   twin.connection.reportedOnline = payload.online !== false;

@@ -5,10 +5,10 @@ const state = {
   selectedDeviceId: null,
   controlNotice: null,
   thresholds: {
-    temperatureHigh: 26,
-    humidityHigh: 60,
-    humidityLow: 35,
-    lightHigh: 800,
+    temperatureHigh: 25,
+    humidityHigh: 55,
+    humidityLow: 45,
+    lightHigh: 150,
     batteryLow: 20
   }
 };
@@ -91,7 +91,7 @@ function selectedDevice() {
 
 function allAlerts() {
   return state.devices.flatMap((device) =>
-    (device.alerts || []).map((alert) => ({
+    riskAlertsForDevice(device).map((alert) => ({
       ...alert,
       deviceId: device.deviceId,
       deviceName: device.name
@@ -99,29 +99,40 @@ function allAlerts() {
   );
 }
 
+function riskAlertsForDevice(device) {
+  return (device?.alerts || []).filter((alert) => ["critical", "warning"].includes(alert.level));
+}
+
 function riskClassForDevice(device) {
   if (!device || !device.connection.online) return "risk-offline";
 
-  const alerts = device.alerts || [];
-  if (alerts.length === 0) return "risk-normal";
-  if (alerts.some((alert) => alert.level === "critical")) return "risk-critical";
-  if (alerts.some((alert) => alert.code === "HIGH_LIGHT_EXPOSURE")) return "risk-light";
-  if (alerts.some((alert) => alert.code === "HIGH_HUMIDITY" || alert.code === "LOW_HUMIDITY")) {
+  const decision = decisionSupportForDevice(device);
+  const factors = decision.factors || [];
+
+  if (decision.riskLevel === "Low Risk" && factors.length === 0) return "risk-normal";
+  if (decision.riskLevel === "Critical Risk" || factors.some((factor) => factor.level === "critical")) {
+    return "risk-critical";
+  }
+  if (factors.some((factor) => factor.code === "HIGH_LIGHT_EXPOSURE")) return "risk-light";
+  if (factors.some((factor) =>
+    ["HIGH_HUMIDITY", "LOW_HUMIDITY", "DAMP_MOULD_RISK"].includes(factor.code)
+  )) {
     return "risk-humidity";
   }
+  if (decision.score > 0) return "risk-warning";
 
-  return "risk-warning";
+  return "risk-normal";
 }
 
 function riskLabelForDevice(device) {
+  if (!device || !device.connection.online) return "offline";
+
+  const decision = decisionSupportForDevice(device);
   const riskClass = riskClassForDevice(device);
 
-  if (riskClass === "risk-normal") return "normal";
-  if (riskClass === "risk-offline") return "offline";
-  if (riskClass === "risk-critical") return "critical risk";
   if (riskClass === "risk-light") return "light risk";
   if (riskClass === "risk-humidity") return "humidity risk";
-  return "attention needed";
+  return decision.riskLevel || "attention needed";
 }
 
 function riskCountText(count) {
@@ -299,7 +310,7 @@ function renderDeviceList() {
     .map((device) => {
       const active = device.deviceId === state.selectedDeviceId ? "active" : "";
       const online = device.connection.online;
-      const alertCount = (device.alerts || []).length;
+      const alertCount = riskAlertsForDevice(device).length;
       const riskClass = riskClassForDevice(device);
 
       return `
@@ -328,10 +339,25 @@ function renderDeviceList() {
 }
 
 function renderAlerts(device) {
-  const alerts = device?.alerts || [];
+  const alerts = riskAlertsForDevice(device);
+  const infoAlerts = (device?.alerts || []).filter((alert) => alert.level === "info");
 
   if (alerts.length === 0) {
-    elements.alerts.innerHTML = `<div class="alert-item ok">No active preservation risk for this zone.</div>`;
+    const notes = infoAlerts
+      .map(
+        (alert) => `
+          <div class="alert-item info">
+            <strong>${escapeHtml(alert.code)}</strong>
+            <span>${escapeHtml(alert.message)}</span>
+            <small>Recommended action: ${escapeHtml(recommendedActionForAlert(alert))}</small>
+          </div>
+        `
+      )
+      .join("");
+    elements.alerts.innerHTML = `
+      <div class="alert-item ok">No active preservation risk for this zone.</div>
+      ${notes}
+    `;
     return;
   }
 
