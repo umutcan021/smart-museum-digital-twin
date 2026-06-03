@@ -505,11 +505,23 @@ function renderChart(device) {
   drawLine("temperature", "#d64545");
   drawLine("humidity", "#1f6feb");
 
-  context.fillStyle = "#102027";
+  context.lineWidth = 4;
+  context.strokeStyle = "#d64545";
+  context.beginPath();
+  context.moveTo(padding, 18);
+  context.lineTo(padding + 28, 18);
+  context.stroke();
+  context.fillStyle = "#d64545";
   context.font = "700 12px Trebuchet MS";
-  context.fillText("Temp", padding, 18);
+  context.fillText("Temp", padding + 36, 18);
+
+  context.strokeStyle = "#1f6feb";
+  context.beginPath();
+  context.moveTo(padding + 88, 18);
+  context.lineTo(padding + 116, 18);
+  context.stroke();
   context.fillStyle = "#1f6feb";
-  context.fillText("Humidity", padding + 52, 18);
+  context.fillText("Humidity", padding + 124, 18);
 }
 
 function renderDetails() {

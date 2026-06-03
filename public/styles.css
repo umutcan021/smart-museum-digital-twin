@@ -625,6 +625,43 @@ code {
   color: var(--muted);
 }
 
+.chart-meta {
+  display: grid;
+  justify-items: end;
+  gap: 8px;
+}
+
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 900;
+}
+
+.chart-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legend-line {
+  display: inline-block;
+  width: 22px;
+  height: 4px;
+  border-radius: 999px;
+}
+
+.legend-line.temperature {
+  background: var(--red);
+}
+
+.legend-line.humidity {
+  background: var(--blue);
+}
+
 .chart-empty {
   margin: -150px 0 100px;
   text-align: center;

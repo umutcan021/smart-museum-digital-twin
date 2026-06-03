@@ -190,7 +190,13 @@
                 <p class="eyebrow">Telemetry History</p>
                 <h3>Temperature / Humidity Trend</h3>
               </div>
-              <small>Last 20 messages</small>
+              <div class="chart-meta">
+                <div class="chart-legend" aria-label="Telemetry chart legend">
+                  <span><i class="legend-line temperature"></i>Temperature</span>
+                  <span><i class="legend-line humidity"></i>Humidity</span>
+                </div>
+                <small>Last 20 messages</small>
+              </div>
             </div>
             <canvas id="telemetry-chart" width="760" height="260"></canvas>
             <p id="chart-empty" class="muted chart-empty">At least two telemetry messages are needed for the chart.</p>
